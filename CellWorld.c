@@ -32,6 +32,8 @@
 
 #define ALIVE 1
 #define DEAD  0
+#define rows 32
+#define threshold 0.25
 
 /***************************************************************************/
 /* Global Vars *************************************************************/
@@ -44,15 +46,195 @@ unsigned long long g_end_cycles=0;
 
 // You define these
 
+//int *universe; //All the cell universe
+
+int **universe; //universe for each rank
+int *ghost_up;      //the ghost row for top row
+int *ghost_down;    //the ghost row for buttom row
+
 
 /***************************************************************************/
 /* Function Decs ***********************************************************/
 /***************************************************************************/
 
 // You define these
-int InitDefault();
-float GenVal(int mpi_rank);
-int PassGeneration(float threshold,char** universe);
+
+
+int generate(int row_index,int key)
+{
+	//int key = row_index+mpi_myrank*(rows/mpi_commsize)
+	
+	//get RNG
+	float rng =  GenVal(key);
+        //printf("%d\n == %lf",row_index,rng);
+	
+	//get state
+        int left, right, up, down,upright,upleft,downright,downleft;
+	int l,r;
+        int lives = 0;
+
+        
+	//random
+        
+        if(rng < threshold){
+
+                for(int i=0; i<rows; i++){
+                        float random = (float)rand()/RAND_MAX;
+                        //printf("[%f]\n",random);
+                        if(random > 0.5){
+                                universe[row_index][i] = 1;
+                                lives ++;
+                        }
+                        else{universe[row_index][i] = 0;}
+                }
+
+                return lives;
+        }
+
+	//rule
+	
+	for(int i=0; i<rows; i++){
+		
+  		//printf("[%d] ",universe[row_index*rows+i]);
+                l = i-1;
+		if(l < 0){l = rows-1;}
+		r = i+1;
+		if(r>= rows){r = 0;}
+
+                left = universe[row_index][l];
+		right = universe[row_index][r];
+
+		
+		if(row_index == 0){
+
+			up = ghost_up[i];
+			upleft = ghost_up[l];
+			upright = ghost_up[r];
+		}
+		else{
+			up = universe[row_index-1][i];
+                        upleft = universe[row_index-1][l];
+                        upright = universe[row_index-1][r];
+
+		}
+
+		
+
+		if(row_index == rows-1){
+
+                        down = ghost_down[i];
+                        downleft = ghost_down[l];
+                        downright = ghost_down[r];
+                }
+                else{
+                        down = universe[row_index+1][i];
+                        downleft = universe[row_index+1][l];
+                        downright = universe[row_index+1][r];
+
+                }
+
+          
+                int state = up + down + left + right + upright + upleft + downright +  downleft;
+		//printf("[%d][%d] \n",row_index,universe[row_index][i]);
+                //universe[row_index][i] = 0;
+                //printf("[%d][%d] \n",row_index,universe[row_index][i]);
+
+		
+                if(universe[row_index][i] == 1){                                                                 //<---------------- Error occure here
+
+                       if(state < 2 || state > 3){universe[row_index][i] = 0;} //underpopulate & overpopulate
+                       else{lives ++;}
+		       
+                }
+		
+                
+                
+                else{
+                        if(state == 3){
+                                universe[row_index][i] = 1;
+                                lives ++;
+                        } //reporduction
+                }
+		
+
+
+        }
+	
+	
+	
+        //printf("\n");
+        return lives;
+
+}   
+//update to each row
+
+
+int communicate(int *ghost_up, int *ghost_down,MPI_Comm comm)   //communication between rows 
+{
+	
+	/*get mpi info*/
+	int mpi_commsize = -1;
+        int mpi_myrank = -1;
+        MPI_Comm_size(comm,&mpi_commsize);
+        MPI_Comm_rank(comm,&mpi_myrank);
+        if(mpi_commsize == -1|| mpi_myrank == -1){
+                perror("ERROR: MPI failed\n");
+                return -1;
+        }
+
+	/*calculate address*/
+
+	 MPI_Request send_require,recv_require;
+	 MPI_Status send_status, recv_status;
+	 int up_address =  mpi_myrank -1; //the address for send the top row and receive the ghost_up layer
+	 int down_address = mpi_myrank +1;  //the address for send the buttom row and receive the ghost_down layer
+	 
+	 if(mpi_myrank == 0){
+		 
+		 up_address =  mpi_commsize -1;
+		 down_address = mpi_myrank +1;
+    	}
+
+    	else if(mpi_myrank == mpi_commsize -1 ){
+
+            	up_address = mpi_myrank -1;
+            	down_address = 0;
+    	}
+
+
+    	//printf("%d %d %d\n",mpi_myrank,up_address,down_address);
+
+
+
+
+
+       /*Send*/
+
+    	//Send to up row
+    	MPI_Isend(ghost_up,rows,MPI_INT,up_address,1,MPI_COMM_WORLD,&send_require);
+    	MPI_Wait(&send_require,&send_status);
+	
+	//send to down row
+	MPI_Isend(ghost_down,rows,MPI_INT,down_address,1,MPI_COMM_WORLD,&send_require);
+	MPI_Wait(&send_require,&send_status);
+
+	/*Receive*/
+
+	//Receive from down neighbour
+	MPI_Irecv(ghost_up,rows,MPI_INT,up_address,1,MPI_COMM_WORLD,&recv_require);
+	MPI_Wait(&recv_require,&recv_status);
+
+
+  	 //Receive from up neighbour
+	 MPI_Irecv(ghost_down,rows,MPI_INT,down_address,1,MPI_COMM_WORLD,&recv_require);
+	 MPI_Wait(&recv_require,&recv_status);
+
+         return 0;
+
+
+
+
+}
 
 /***************************************************************************/
 /* Function: Main **********************************************************/
@@ -63,6 +245,7 @@ int main(int argc, char *argv[])
 //    int i = 0;
     int mpi_myrank;
     int mpi_commsize;
+    time_t t;
 // Example MPI startup and using CLCG4 RNG
     MPI_Init( &argc, &argv);
     MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
@@ -70,17 +253,85 @@ int main(int argc, char *argv[])
     
 // Init 32,768 RNG streams - each rank has an independent stream
     InitDefault();
-    
+    srand(time(&t));
+
 // Note, used the mpi_myrank to select which RNG stream to use.
 // You must replace mpi_myrank with the right row being used.
 // This just show you how to call the RNG.    
-    printf("Rank %d of %d has been started and a first Random Value of %lf\n", 
-	   mpi_myrank, mpi_commsize, GenVal(mpi_myrank));
+    //printf("Rank %d of %d has been started and a first Random Value of %lf\n", 
+	   //mpi_myrank, mpi_commsize, GenVal(mpi_myrank));
     
-    MPI_Barrier( MPI_COMM_WORLD );
+    //MPI_Barrier( MPI_COMM_WORLD );
     
 // Insert your code
     
+    //Initalization, start timer
+    //if(mpi_myrank == 0){}
+    //MPI_Scatter();
+    //
+
+
+    int num_row = rows/mpi_commsize;
+    universe = calloc(num_row,sizeof(int*));
+
+    if(universe == NULL){
+	    perror("ERROR:Unable to form universe\n");
+	    return -1;
+    }
+
+    for(int i=0; i<num_row; i++){
+	    
+	    universe[i] = calloc(rows,sizeof(int));
+	    if(universe == NULL){
+		    perror("ERROR:Unable to form universe\n");
+		    return -1;
+	    }
+
+    }
+
+    ghost_up = calloc(rows,sizeof(int));
+    ghost_down = calloc(rows,sizeof(int));
+
+    if(ghost_up == NULL || ghost_down == NULL){
+            perror("ERROR,Unable to form array");
+            return -1;
+    }
+   
+    int tick = 1;
+    for(int i=0; i<num_row; i++){
+                    for(int j=0;j<rows; j++){universe[i][j] = 1;}
+            }
+
+
+    
+    for(int t=0; t<tick; t++){
+
+   	    for(int i=0; i<rows; i++){ghost_up[i] = universe[0][i];}
+    	    for(int i=0; i< rows; i++){ghost_down[i] = universe[num_row-1][i];}
+            //printf("%d %d\n",num_row,mpi_myrank);
+           communicate(ghost_up, ghost_down,MPI_COMM_WORLD);
+           //printf("[%d] [%s] [%d]\n",mpi_myrank,"u",ghost_up[1]);
+           //printf("[%d] [%s] [%d]\n",mpi_myrank,"d",ghost_down[1]);
+	   
+	   for(int i=7; i<8; i++){generate(i,(i+mpi_myrank*num_row));}
+    }
+
+    
+    //printf("--------------------------------------------------------------\n");
+    //for(int i=0; i<num_row; i++){
+            //printf("[%d] ",i+mpi_myrank*num_row);
+	    //for(int j=0; j<rows; j++){
+		   //printf("%d ",universe[i][j]);
+	    //}
+	    //printf("\n");
+    //}
+    //printf("--------------------------------------------------------------\n");
+    //
+
+    for(int i=0; i<num_row; i++){free(universe[i]);}
+    free(universe);
+
+
 
 // END -Perform a barrier and then leave MPI
     MPI_Barrier( MPI_COMM_WORLD );
@@ -91,3 +342,4 @@ int main(int argc, char *argv[])
 /***************************************************************************/
 /* Other Functions - You write as part of the assignment********************/
 /***************************************************************************/
+
