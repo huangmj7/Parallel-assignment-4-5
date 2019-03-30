@@ -348,6 +348,10 @@ int main(int argc, char *argv[])
 
 
 
+    free(unit_universe);
+    free(ghost_up);
+    free(ghost_down);
+    if(universe != NULL){free(universe);}
     // END -Perform a barrier and then leave MPI
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Finalize();

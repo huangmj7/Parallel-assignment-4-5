@@ -48,6 +48,7 @@ unsigned long long g_end_cycles=0;
 //int *universe; //All the cell universe
 
 int **universe; //universe for each rank
+int *line_universe;
 int *ghost_up;      //the ghost row for top row
 int *ghost_down;    //the ghost row for buttom row
 
@@ -60,6 +61,7 @@ int mpi_commsize = -1;
 
 // You define these
 
+void index(r,c){return r*rows+c;}
 
 int generate(int row_index,int num_row,int key)
 {
@@ -80,8 +82,7 @@ int generate(int row_index,int num_row,int key)
         if(rng < threshold){
 
                 for(int col=0; col<rows; col++){
-                        double random = (double)rand()/RAND_MAX;
-                        //printf("[%f]\n",random);
+                        double random = GenVal(key);
                         if(random > 0.5){
                                 universe[row_index][col] = 1;
                                 lives ++;
@@ -237,7 +238,6 @@ int communicate(int *ghost_up, int *ghost_down,MPI_Comm comm)   //communication 
 int main(int argc, char *argv[])
 {
 //    int i = 0;
-      time_t t;
 // Example MPI startup and using CLCG4 RNG
     MPI_Init( &argc, &argv);
     MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
@@ -245,7 +245,7 @@ int main(int argc, char *argv[])
     
 // Init 32,768 RNG streams - each rank has an independent stream
     InitDefault();
-    srand(time(&t));
+    
 
 // Note, used the mpi_myrank to select which RNG stream to use.
 // You must replace mpi_myrank with the right row being used.
