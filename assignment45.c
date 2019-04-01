@@ -218,6 +218,7 @@ int main(int argc, char *argv[])
 		while(!CheckComplete());
 
 		ResetChecklist();
+
 /*
 		char* buffer = calloc(10, sizeof(char));
 
