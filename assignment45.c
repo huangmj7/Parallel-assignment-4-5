@@ -13,7 +13,7 @@
 #include<errno.h>
 #include<math.h>
 
-#include<clcg4.h>
+#include"clcg4.h"
 
 #include<mpi.h>
 #include<pthread.h>
@@ -32,7 +32,7 @@
 
 #define ALIVE 1
 #define DEAD  0
-#define rows 32
+#define rows 32768
 
 /***************************************************************************/
 /* Global Vars *************************************************************/
@@ -45,8 +45,6 @@ unsigned long long g_end_cycles = 0;
 
 // You define these
 
-//int *universe; //All the cell universe
-char *universe; //universe for each rank
 char *unit_universe;
 char *ghost_up;      //the ghost row for top row
 char *ghost_down;    //the ghost row for buttom row
@@ -55,7 +53,7 @@ double threshold = 0.25;
 int mpi_myrank = -1;
 int mpi_commsize = -1;
 int num_row;
-int num_thread = 8;
+int num_thread;
 int NumOfRow_Thread;
 
 int ticks;
@@ -89,6 +87,8 @@ void CreateThread(void);
 void* ProcessByThread(void* a);
 void OneRound(int t_i);
 int ProcessByLine(int row_index);
+
+void Parallel_IO_map(char* filename);
 
 
 int communicate(char *ghost_up, char *ghost_down, MPI_Comm comm)   //communication between rows 
@@ -129,13 +129,13 @@ int communicate(char *ghost_up, char *ghost_down, MPI_Comm comm)   //communicati
 	MPI_Barrier(comm);
 
 	//send to down row
-	MPI_Isend(ghost_down, rows, MPI_CHAR, down_address, 1, MPI_COMM_WORLD, &send_require);
+	MPI_Isend(ghost_down, rows, MPI_CHAR, down_address, 2, MPI_COMM_WORLD, &send_require);
 	MPI_Barrier(comm);
 
 	/*Receive*/
 
 	//Receive from down neighbour
-	MPI_Irecv(ghost_up, rows, MPI_CHAR, up_address, 1, MPI_COMM_WORLD, &recv_require);
+	MPI_Irecv(ghost_up, rows, MPI_CHAR, up_address, 2, MPI_COMM_WORLD, &recv_require);
 	MPI_Wait(&recv_require, &recv_status);
 
 
@@ -150,16 +150,18 @@ int communicate(char *ghost_up, char *ghost_down, MPI_Comm comm)   //communicati
 int main(int argc, char *argv[])
 {
 
+	num_thread = atoi(argv[1]);
+
 	// Example MPI startup and using CLCG4 RN
 	MPI_Init(&argc, &argv);
 	MPI_Comm_size(MPI_COMM_WORLD, &mpi_commsize);
 	MPI_Comm_rank(MPI_COMM_WORLD, &mpi_myrank);
 
-	// Init 32,768 RNG streams - each rank has an independent stream
 	num_row = rows / mpi_commsize;
 
 	ticks = 0;
 	
+	// Init 32,768 RNG streams - each rank has an independent stream
 	InitDefault();
 
 	MPI_Comm comm = MPI_COMM_WORLD;
@@ -173,57 +175,25 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	if (mpi_myrank == 0) {
-
-		universe = calloc(rows*rows, sizeof(char));
-		if (universe == NULL) {
-			perror("ERROR:unable to form array\n");
-			return -1;
-		}
-
-		for (int i = 0; i<(rows*rows); i++) { universe[i] = 1; }  //all cell alive in the beginning 
-	}
 
 	if (mpi_myrank == 0){
 		g_start_cycles = GetTimeBase();
 	}
 
-	//Deprecated----------------------------------------------------------------------------------------
-	//scatter 
-
-	MPI_Barrier(MPI_COMM_WORLD);
-	int pass = -1;
-	pass = MPI_Scatter(universe, 
-			((rows*rows) / mpi_commsize), 
-			MPI_CHAR, 
-			unit_universe, 
-			((rows*rows) / mpi_commsize), 
-			MPI_CHAR,
-			0, 
-			MPI_COMM_WORLD);
-
-	if (pass == -1) {
-		perror("ERROR:scatter failed\n");
-		return -1;
-	}
-	MPI_Barrier(comm);
-
-	//====================================================================================================
-	
 	//Init locally
+	
+	for(int i = 0; i < rows * num_row; i++){
+		unit_universe[i] = 1;
+	}
 
-	/*
-	printf("[%d] ",mpi_myrank);
-	for(int i=0; i<rows; i++){printf("%d ",unit_universe[i]);}
-	printf("\n");
-	*/
+	MPI_Barrier(comm);
 
 
 	//start generate
 	
 	CreateThread();
 	
-	for (int t = 0; t < 15; t++) {
+	for (int t = 0; t < 3; t++) {
 
 		//update ghost row
 		for (int i = 0; i<rows; i++) {
@@ -234,51 +204,70 @@ int main(int argc, char *argv[])
 
 		//communicate
 
-		pass = communicate(ghost_up, ghost_down, comm);
+		int pass = communicate(ghost_up, ghost_down, comm);
 		if (pass == -1) {
 			perror("ERROR: communication failed, program end..\n");
 			return -1;
 		}
 
 		
-		ticks = i;
+		ticks = t;
 
 		OneRound(0);
 
 		while(!CheckComplete());
 
 		ResetChecklist();
+
+		printf("Tick #%d finished\n", t);
+/*
+		char* buffer = calloc(10, sizeof(char));
+
+		sprintf(buffer, "%d.txt", t+1);
+
+		Parallel_IO_map(buffer);
+
+		free(buffer); */
 	}
 
 	stop_flag = 1;
 
 	g_end_cycles = GetTimeBase();
 
-	//Deprecated----------------------------------------------------------------------------------
-	MPI_Gather(unit_universe, num_row*rows, MPI_CHAR, universe, num_row*rows, MPI_CHAR, 0, comm);
+	g_time_in_secs = ((double)(g_end_cycles - g_start_cycles) / g_processor_frequency);
 
-	if (mpi_myrank == 0) {
-		for (int i = 0; i<rows; i++) {
-			printf("[%d] ", i);
-			for (int j = 0; j<rows; j++) { printf("%d ", universe[loc(i, j)]); }
-			printf("\n");
-		}
+	if(mpi_myrank == 0){
+		printf("R# %d T# %d: Processing used %lf s\n", 
+			mpi_commsize,
+			num_thread,
+			g_time_in_secs);
 	}
-	//--------------------------------------------------------------------------------------------
-	
+
 	//Use Parallel IO instead
+	char* buffer = calloc(100, sizeof(char));
+	sprintf(buffer, "R%dT%d.txt", mpi_commsize, num_thread);
 	
 	g_start_cycles = GetTimeBase();
-
+	
+	Parallel_IO_map(buffer);
 
 	g_end_cycles = GetTimeBase();
+	
+	g_time_in_secs = ((double)(g_end_cycles - g_start_cycles) / g_processor_frequency);
 
+	if(mpi_myrank == 0){
+		printf("R# %d T# %d: IO used %lf s\n", 
+			mpi_commsize,
+			num_thread,
+			g_time_in_secs);
+	}
+
+	free(buffer);
 	//------------------------------------------------
 
 	free(unit_universe);
 	free(ghost_up);
 	free(ghost_down);
-	if (universe != NULL) { free(universe); }
 	// END -Perform a barrier and then leave MPI
 	MPI_Barrier(MPI_COMM_WORLD);
 	MPI_Finalize();
@@ -332,8 +321,6 @@ void* ProcessByThread(void* a){
 
 	free(a);
 
-	printf("Create %d\n", t_i);
-
 	int counter = 0;
 	
 	while(!stop_flag){
@@ -354,7 +341,7 @@ void OneRound(int t_i){
 
 int ProcessByLine(int row_index){
 
-	int key = row_index + mpi_myrank * rows;
+	int key = row_index + mpi_myrank * num_row;
 
 	double rng = GenVal(key);
 
@@ -447,4 +434,40 @@ int ProcessByLine(int row_index){
 	return lives;
 }
 
+void Parallel_IO_map(char* filename){
 
+	size_t try_len = 1000000;
+	size_t real_len;
+
+	long long offset;
+
+	MPI_File fh;
+
+	MPI_Status status;
+
+	MPI_File_open(MPI_COMM_WORLD,
+		filename,
+		MPI_MODE_CREATE|MPI_MODE_WRONLY,
+        MPI_INFO_NULL,
+        &fh);
+
+	char* buffer = calloc(try_len, sizeof(char));
+
+	for(int i = 0; i < num_row; i++){
+		for(int j = 0; j < rows; j++){
+			buffer[j*2] = unit_universe[loc(i, j)] + '0';
+			if(j == rows - 1) buffer[j*2 + 1] = '\n';
+			else buffer[j*2 + 1] = ' ';
+		}
+
+		real_len = strlen(buffer);
+
+		offset = mpi_myrank * (num_row * real_len) + i * real_len;
+		offset *= sizeof(char);
+
+		MPI_File_write_at(fh, offset, buffer, real_len, MPI_CHAR, &status);
+	}
+
+	MPI_File_close(&fh);
+
+}
