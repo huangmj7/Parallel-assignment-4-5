@@ -1,2 +1,2 @@
 all:
-	gcc playground.c clcg4.c -o main.o -pthread
+	mpixlc -O5 assignment45.c clcg4.c -o main.xl -lpthread
