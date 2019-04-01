@@ -219,7 +219,7 @@ int main(int argc, char *argv[])
 
 		ResetChecklist();
 
-		printf("Tick #%d finished\n", t);
+		if(mpi_myrank == 0)printf("Tick #%d finished\n", t);
 /*
 		char* buffer = calloc(10, sizeof(char));
 
