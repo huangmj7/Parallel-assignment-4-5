@@ -2,26 +2,34 @@
 
 pwd="/gpfs/u/home/PCP8/PCP8hnhh/scratch/hw45"
 
-#------------------------------------test 1-----------------------------------
+#------------------------------------test 2-----------------------------------
+ticks=256
+threshold=0.25
+Nnode=4
+total=$( ($Nnode * 64) )
 
-total=256
-nrank=256
-nthread=$(($total / $nrank))
-srun --ntasks	$nrank	--overcommit --cpus-per-task=1 -o R${nrank}_T${nthread}.log	${pwd}/main.xl $nthread 
+#0 threads per MPI rank (64 MPI ranks per compute node)
+nthread=1
+nrank=$( ($total / $nthread) )
+srun --ntasks	$nrank	--overcommit --cpus-per-task=${nthread}  -o R${nrank}_T${nthread}.log	${pwd}/main.xl $nthread 0 $ticks $threshold
 
-nrank=64
-nthread=$(($total / $nrank))
-srun --ntasks	$nrank	--overcommit --cpus-per-task=4 -o R${nrank}_T${nthread}.log	${pwd}/main.xl $nthread 
+#4 threads per MPI rank (16 MPI ranks per compute node, rest are threads)
+nthread=4
+nrank=$( ($total / $nthread) )
+srun --ntasks	$nrank	--overcommit --cpus-per-task=${nthread}  -o R${nrank}_T${nthread}.log	${pwd}/main.xl $nthread 0 $ticks $threshold
 
-nrank=16
-nthread=$(($total / $nrank))
-srun --ntasks	$nrank	--overcommit --cpus-per-task=16 -o R${nrank}_T${nthread}.log	${pwd}/main.xl $nthread 
+#16 threads per MPI rank ( 4 MPI ranks per compute node, rest are threads)
+nthread=16
+nrank=$( ($total / $nthread) )
+srun --ntasks	$nrank	--overcommit --cpus-per-task=${nthread} -o R${nrank}_T${nthread}.log	${pwd}/main.xl $nthread 0 $ticks $threshold
 
-nrank=8
-nthread=$(($total / $nrank))
-srun --ntasks	$nrank	--overcommit --cpus-per-task=32 -o R${nrank}_T${nthread}.log	${pwd}/main.xl $nthread 
+#32 threads per MPI rank ( 2 MPI ranks per compute node, rest are threads)
+nthread=32
+nrank=$( ($total / $nthread) )
+srun --ntasks	$nrank	--overcommit --cpus-per-task=${nthread} -o R${nrank}_T${nthread}.log	${pwd}/main.xl $nthread 0 $ticks $threshold
 
-nrank=4
-nthread=$(($total / $nrank))
-srun --ntasks	$nrank	--overcommit --cpus-per-task=64 -o R${nrank}_T${nthread}.log	${pwd}/main.xl $nthread 
+#32 threads per MPI rank ( 2 MPI ranks per compute node, rest are threads)
+nthread=64
+nrank=$( ($total / $nthread) )
+srun --ntasks	$nrank	--overcommit --cpus-per-task=${nthread} -o R${nrank}_T${nthread}.log	${pwd}/main.xl $nthread 0 $ticks $threshold
 #----------------------------------end of test--------------------------------

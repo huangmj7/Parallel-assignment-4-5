@@ -18,7 +18,7 @@
 #include<mpi.h>
 #include<pthread.h>
 
-#define BGQ 1 // when running BG/Q, comment out when testing on mastiff
+//#define BGQ 1 // when running BG/Q, comment out when testing on mastiff
 
 #ifdef BGQ
 #include<hwi/include/bqc/A2_inlines.h>
@@ -49,14 +49,17 @@ char *unit_universe;
 char *ghost_up;      //the ghost row for top row
 char *ghost_down;    //the ghost row for buttom row
 
-double threshold = 0.25;
+double threshold;
+int Numtick;
 int mpi_myrank = -1;
 int mpi_commsize = -1;
 int num_row;
 int num_thread;
 int NumOfRow_Thread;
 
+
 volatile int ticks;
+volatile int livesOneRound;
 char stop_flag = 0;
 char* progress_list;
 int** ti_list;
@@ -146,11 +149,13 @@ int communicate(char *ghost_up, char *ghost_down, MPI_Comm comm)   //communicati
 	return 0;
 }
 
-
+//main.o [# threads] [if Parallel IO] [Numtick] [threshold]
 int main(int argc, char *argv[])
 {
 
 	num_thread = atoi(argv[1]);
+	Numtick = atoi(argv[3]);
+	threshold = (double)atof(argv[4]);
 
 	// Example MPI startup and using CLCG4 RN
 	MPI_Init(&argc, &argv);
@@ -160,6 +165,7 @@ int main(int argc, char *argv[])
 	num_row = rows / mpi_commsize;
 
 	ticks = 0;
+	livesOneRound = 0;
 	
 	// Init 32,768 RNG streams - each rank has an independent stream
 	InitDefault();
@@ -193,7 +199,7 @@ int main(int argc, char *argv[])
 	
 	CreateThread();
 	
-	for (int t = 0; t < 256; t++) {
+	for (int t = 0; t < Numtick; t++) {
 
 		//update ghost row
 		for (int i = 0; i<rows; i++) {
@@ -217,6 +223,10 @@ int main(int argc, char *argv[])
 
 		while(!CheckComplete());
 
+		//An example
+		printf("local sum: %d\n", livesOneRound);
+
+		//Must retrive local lives before this point
 		ResetChecklist();
 
 /*
@@ -243,6 +253,8 @@ int main(int argc, char *argv[])
 	}
 
 	//Use Parallel IO instead
+	//
+	if( atoi(argv[2]) == 1 ){
 	char* buffer = calloc(100, sizeof(char));
 	sprintf(buffer, "R%dT%d.txt", mpi_commsize, num_thread);
 	
@@ -262,6 +274,7 @@ int main(int argc, char *argv[])
 	}
 
 	free(buffer);
+	}
 	//------------------------------------------------
 
 	free(unit_universe);
@@ -292,6 +305,8 @@ void ResetChecklist(void){
 	for(int i = 0; i < num_thread; i++){
 		progress_list[i] = 0;
 	}
+
+	livesOneRound = 0;
 
 	pthread_mutex_unlock(&lock);
 }
@@ -327,7 +342,6 @@ void* ProcessByThread(void* a){
 
 	while(!stop_flag){
 
-		sleep(1);
 		while(counter <= ticks){
 			
 			OneRound(t_i);
@@ -340,11 +354,18 @@ void* ProcessByThread(void* a){
 }
 
 void OneRound(int t_i){
+	int lives = 0;
+
 	for(int i = 0; i < NumOfRow_Thread; i++){
-		ProcessByLine(t_i * NumOfRow_Thread + i);
+		lives += ProcessByLine(t_i * NumOfRow_Thread + i);
 	}
 
+	pthread_mutex_lock(&lock);
+
 	progress_list[t_i] = 1;
+	livesOneRound += lives;
+
+	pthread_mutex_unlock(&lock);
 }
 
 int ProcessByLine(int row_index){
@@ -355,7 +376,7 @@ int ProcessByLine(int row_index){
 
 	char neighbor[8];
 	int l, r;
-	int lives;
+	int lives = 0;
 
 	if(rng < threshold){
 
@@ -366,6 +387,7 @@ int ProcessByLine(int row_index){
 
 			if(random > 0.5){
 				unit_universe[loc(row_index, col)] = 1;
+				lives++;
 			}
 
 			else{
@@ -425,6 +447,9 @@ int ProcessByLine(int row_index){
 			if(unit_universe[loc(row_index, col)] == 1){
 				if(state < 2 || state > 3){
 					unit_universe[loc(row_index, col)] = 0;
+				}
+				else{
+					lives++;
 				}
 			}
 
