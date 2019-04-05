@@ -48,6 +48,8 @@ unsigned long long g_end_cycles = 0;
 char *unit_universe;
 char *ghost_up;      //the ghost row for top row
 char *ghost_down;    //the ghost row for buttom row
+long long int sendbuf[1];
+long long int recvbuf[1];
 
 double threshold;
 int Numtick;
@@ -152,12 +154,14 @@ int communicate(char *ghost_up, char *ghost_down, MPI_Comm comm)   //communicati
 //main.o [# threads] [if Parallel IO] [Numtick] [threshold]
 int main(int argc, char *argv[])
 {
-
+ 
+        
 	num_thread = atoi(argv[1]);
 	Numtick = atoi(argv[3]);
 	threshold = (double)atof(argv[4]);
 
-	// Example MPI startup and using CLCG4 RN
+
+        // Example MPI startup and using CLCG4 RN
 	MPI_Init(&argc, &argv);
 	MPI_Comm_size(MPI_COMM_WORLD, &mpi_commsize);
 	MPI_Comm_rank(MPI_COMM_WORLD, &mpi_myrank);
@@ -175,6 +179,8 @@ int main(int argc, char *argv[])
 	unit_universe = calloc(num_row*rows, sizeof(char));
 	ghost_up = calloc(rows, sizeof(char));
 	ghost_down = calloc(rows, sizeof(char));
+	long long int alive_array[Numtick]; //record the number of alive in each tick
+	for(int i=0; i<Numtick; i++){alive_array[i] = -1;}
 
 	if (ghost_up == NULL || ghost_down == NULL || unit_universe == NULL) {
 		perror("ERROR,Unable to form array");
@@ -224,7 +230,13 @@ int main(int argc, char *argv[])
 		while(!CheckComplete());
 
 		//An example
-		printf("local sum: %d\n", livesOneRound);
+		//printf("local sum: %d\n", livesOneRound);
+		sendbuf[0] =  livesOneRound;
+		MPI_Reduce(sendbuf,recvbuf,1,MPI_LONG_LONG_INT,MPI_SUM,0,MPI_COMM_WORLD);
+		if(mpi_myrank == 0){
+			//printf("[%d] total sum: %lld\n",t,recvbuf[0]);
+			alive_array[t] = recvbuf[0]; 
+		}
 
 		//Must retrive local lives before this point
 		ResetChecklist();
@@ -250,6 +262,7 @@ int main(int argc, char *argv[])
 			mpi_commsize,
 			num_thread,
 			g_time_in_secs);
+		for(int i=0; i<Numtick;i++){printf("%d %lld\n",i,alive_array[i]);}
 	}
 
 	//Use Parallel IO instead
