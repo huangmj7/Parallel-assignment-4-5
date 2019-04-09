@@ -2,7 +2,7 @@ import numpy as np
 import seaborn as sb
 import matplotlib.pyplot as plt
 
-filename = "0.txt"
+filename = "0.txt" #the name of output 1k*1k file, it test, please replace the 1k*1k text file outputed by text.c
 file = open(filename,mode='r',encoding='utf-8')
 Map = file.read().split("\n")
 print(Map[1024])
